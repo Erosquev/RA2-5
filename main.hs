@@ -6,24 +6,26 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
+import System.IO (hFlush, stdout)
+import Control.Exception (catch, IOException)
+import Data.Time.Clock (getCurrentTime)
 
 
 -- -------------------------Tipos principais do sistema de inventário ----------------------
 
 -- -------Representa um item individual no inventário
+
 data Item = Item {
     itemID    :: String,   
     nome      :: String,   
     quantidade :: Int,     
     categoria :: String    
-}
+}deriving (Show, Read, Eq, Generic) -- aqui aplico as implementações necessárias:
+                                    --   Show: permite converter o item em texto 
+                                    --   Read: permite ler um item a partir de texto com 'read'
+                                    --   Eq: permite comparar dois itens 
+                                    --   Generic: habilita serialização automática
 
--- aqui aplico as implementações necessárias:
---   Show: permite converter o item em texto (para imprimir com 'print')
---   Read: permite ler um item a partir de texto (com 'read')
---   Eq: permite comparar dois itens (==)
---   Generic: habilita serialização automática (ex: JSON)
-deriving (Show, Read, Eq, Generic)
 
 
 
@@ -67,8 +69,8 @@ data LogEntry = LogEntry {
     acao      :: AcaoLog,  -- Tipo de ação (Add, Remove, Update)
     detalhes  :: String,   -- Descrição textual da operação
     status    :: StatusLog -- Resultado da operação (Sucesso ou Falha)
-}
-deriving (Show, Read, Eq, Generic) -- As mesmas implemetações são aplicadas aqui:
+}deriving (Show, Read, Eq, Generic) -- As mesmas implemetações são aplicadas aqui:
+
 
 
 -- ----------------------------- Funções Puras de Transação -----------------------------
@@ -162,4 +164,264 @@ updateQty time idItem novaQtd inv =
                             ("Quantidade de " ++ nome item ++ " atualizada para " ++ show novaQtd ++ ".")
                             Sucesso -- cria um log de sucesso
                     in Right (novoInv, logOk) -- Retorna Right (novoInv, logOk).
+                    
+                    
+                    
+                    
+-- --------------------------------Main e Loop de Estado------------------------------
+
+-- ---------Leitura e Escrita de Arquivos:
+
+-- utilizando aliases, nomeamos os caminhos dos arquivos usados pelo programa:
+
+-- caminho do arquivo que guarda o inventário serializado
+inventarioFile :: FilePath
+inventarioFile = "Inventario.dat" -- caminho relativos ao diretório atual do processo
+
+-- caminho do arquivo que guarda o log/auditoria, sendo uma linha por LogEntry
+logFile :: FilePath
+logFile = "Auditoria.log" -- caminho relativos ao diretório atual do processo
+
+-- aqui é feita a leitura do inventário do arquivo, tratando erro com 'catch'
+carregarInventario :: IO Inventario
+carregarInventario = do
+    -- tenta ler o conteúdo de texto do arquivo inventarioFile
+    conteudo <- catch (readFile inventarioFile) handler
+    -- converte o texto lido para o valor Haskell usando 'read' -- tenta interpretar a string como um valor do tipo Inventario
+    return (read conteudo)
+  where
+    --se ocorrer IOException se arquivo não existir, handler é executado 
+    handler :: IOException -> IO String
+    handler _ = return "Map.empty" -- aqui é retornado a string "Map.empty" para que 'read' produza Map.empty
+
+
+
+-- Não carrega o log na memória, apenas garante que exista.
+-- Usa catch para não falhar se não existir
+carregarLog :: IO ()
+carregarLog = catch (readFile logFile >> return ()) handler -- readFile logFile lê o arquivo e >> return () descarta o conteúdo e devolve ()
+  where
+    handler :: IOException -> IO ()
+    -- se ocorrer exceção (caso o arquivo não exista), handler cria um arquivo vazio com writeFile ""
+    handler _ = writeFile logFile ""
+
+
+
+
+-- Serializa o inventario com show e escreve no arquivo, 
+-- sobrescrevendo o conteúdo que tinha antes com o show inv
+salvarInventario :: Inventario -> IO ()
+salvarInventario inv = writeFile inventarioFile (show inv)
+
+
+-- Serializa LogEntry com show e acrescenta no final de Auditoria.log, mantendo uma entrada por linha.
+salvarLog :: LogEntry -> IO ()
+salvarLog logEntry = appendFile logFile (show logEntry ++ "\n")
+-- appendFile adiciona ao final do arquivo; cada LogEntry fica em uma linha
+
+
+
+
+-- ------------------ Parser e Execução de Comandos
+
+-- Formato esperado de comandos via terminal:
+-- add <id> <nome> <qtd> <cat>
+-- remove <id>
+-- update <id> <qtd>
+-- exit
+
+-- processarComando recebe:
+--   UTCTime  -> momento atual (para o log)
+--   [String] -> comando tokenizado (ex.: words linha)
+--   Inventario -> estado atual
+-- retorna: IO Inventario (novo estado, possivelmente igual ao anterior)
+
+
+
+-- Essa função é o que une a camada pura e a camada IO
+processarComando :: UTCTime -> [String] -> Inventario -> IO Inventario
+
+-- Caso o usuário não insira comandos, é impresso "Comando vazio." no terminal
+-- e retorna o inventário sem alteracoes
+processarComando _ [] inv = do
+    putStrLn "Comando vazio."
+    return inv
+
+
+-- -------------------- ADD --------------------
+-- Pattern matching: "add":idItem:nome:qtdStr:cat:_  => pega os primeiros 4 tokens
+-- corresponde apenas se houver pelo menos 4 tokens após "add".
+
+-- idItem: 1º token depois do "add"
+-- nome : 2º token (aqui os nomes tem que estar entre áspas).
+-- qtdStr :3º token (string a ser parseada como Int).
+-- cat: 4º token (categoria).
+-- :_ ignora quaisquer tokens adicionais.
+
+processarComando time ("add":idItem:nome:qtdStr:cat:_) inv =
+    case reads qtdStr :: [(Int, String)] of    -- reads tenta parsear qtdStr como Int e retorna lista de pares (valor, String), 
+        [(qtd, "")] -> do --   o formato [(valor,"")] indica sucesso
+            let item = Item idItem nome qtd cat  -- cria Item a partir dos tokens
+            case addItem time item inv of  -- chama função pura addItem
+            
+                -- caso de erro:
+                Left msg -> do
+                    let logFail = LogEntry time Add msg (Falha msg) -- escreve entrada de falha no log
+                    salvarLog logFail -- grava log de falha
+                    putStrLn ("Erro: " ++ msg) -- printa mensagem de falha
+                    return inv      -- retora o inventário sem alteracoes
+                    
+                -- caso de certo:                         
+                Right (novoInv, logOk) -> do
+                    salvarInventario novoInv        -- sobrescreve inventário 
+                    salvarLog logOk                 -- escreve entrada de sucesso no log
+                    putStrLn "Item adicionado com sucesso!" -- printa aviso de sucesso
+                    return novoInv                  -- retorna o novo inventário
+                    
+                    
+        _ -> do
+            let msg = "Quantidade inválida."
+            let logFail = LogEntry time Add msg (Falha msg)  -- escreve entrada de falha no log
+            salvarLog logFail       -- adiciona a falha do log
+            putStrLn msg   -- printa mensagem de falha
+            return inv -- retorna o inventario sem alteracoes
+            
+            
+            
+            
+
+-- -------------------- REMOVE --------------------
+-- Pattern matching exige o comando "remove" seguido de pelo menos um token (o idItem).
+processarComando time ("remove":idItem:_) inv =
+    case removeItem time idItem inv of                     -- chama função pura removeItem
+    
+    -- Caso de erro:
+        Left msg -> do
+            let logFail = LogEntry time Remove msg (Falha msg)      -- escreve entrada de falha no log
+            salvarLog logFail                                       -- grava log de falha
+            putStrLn ("Erro: " ++ msg)                      -- printa mensagem de falha
+            return inv                                     -- retorna inventario inalterado
+            
+    -- Caso de Sucesso:
+        Right (novoInv, logOk) -> do
+            salvarInventario novoInv                       --  salva inventário atualizado
+            salvarLog logOk                                 -- grava log de sucesso
+            putStrLn "Item removido com sucesso!"          -- printa mensagem de sucesso
+            return novoInv                                  -- retorna inventario novo 
+
+
+
+
+
+
+-- -------------------- UPDATE --------------------
+-- Pattern matching: precisa de pelo menos 2 tokens depois de "update": idItem e novaQtdStr
+processarComando time ("update":idItem:novaQtdStr:_) inv =
+
+    case reads novaQtdStr :: [(Int, String)] of           -- Validação da novaQtdStr com o reads usando a mesma lógica do add
+        [(novaQtd, "")] -> do --   o formato [(valor,"")] indica sucesso
+            case updateQty time idItem novaQtd inv of      -- chama função pura updateQty
+            
+            -- caso de erro:
+                Left msg -> do
+                    let logFail = LogEntry time Update msg (Falha msg) -- escreve entrada de falha no log
+                    salvarLog logFail                               -- grava log de falha
+                    putStrLn ("Erro: " ++ msg)                  -- printa mensagem de falha
+                    return inv                                 -- retorna inventário sem alteracoes
+                    
+            -- caso de sucesso:
+                Right (novoInv, logOk) -> do
+                    salvarInventario novoInv               -- salva inventário novo
+                    salvarLog logOk                         -- grava log de sucesso
+                    putStrLn "Quantidade atualizada!"     -- printa mensagem de sucesso
+                    return novoInv                      -- retorna inventário alterado 
+                    
+                    
+        -- caso não seja um Int válido o parse da quantidade falha ""           
+        _ -> do
+            let msg = "Quantidade inválida."
+            let logFail = LogEntry time Update msg (Falha msg) -- escreve entrada de falha no log
+            salvarLog logFail                               -- grava log de falha
+            putStrLn msg                        -- printa mensagem de falha
+            return inv                          -- retorna inventário inalterado
+
+
+
+
+
+-- -------------------- EXIT --------------------
+processarComando _ ["exit"] inv = do        -- Se o tokenizado for exatamente ["exit"]:  
+    putStrLn "Encerrando programa..."    -- printa mensagem de encerramento
+    return inv                          -- devolve inventário atual sem alterá-lo
+
+
+
+
+
+-- -------------------- ETC --------------------
+
+-- Qualquer outra entrada, seja número errado de tokens, comando desconhecido, etc, cai aqui 
+
+processarComando _ _ inv = do
+    let msg = "Comando inválido."
+    time <- getCurrentTime              -- obtém o horário atual do sistema e atribui à variável time
+    let logFail = LogEntry time QueryFail msg (Falha msg) -- escreve entrada de falha no log
+    salvarLog logFail       -- grava log de falha
+    putStrLn msg        -- printa mensagem de falha
+    return inv             -- devolve inventário atual sem alterá-lo
+    
+    
+    
+    
+
+
+
+-- --------------------------------Loop Principal ------------------------------
+
+-- Recebe o estado atual do inventario e devolve uma ação IO () que faz o loop ser interativo
+loopPrincipal :: Inventario -> IO ()
+loopPrincipal inv = do  -- Abre um do-block para sequenciar ações IO, inv sendo o inventário atual
+    putStr "\n-  "           -- linha que mostra para o usuário onde digitar
+    hFlush stdout           -- garante que a linha para o usuário apareça direto sem buffer
+    linha <- getLine        -- lê a linha digitada pelo usuário. O resultado "linha" é a string digitada
+    if linha == "exit"      -- checa se o usuário digitou a opçao "exit" que fecha o programa
+        then putStrLn "Saindo..." -- printa mensagem de saida
+        
+        -- caso o usuário não tenha digitado o comando de saida:
+        else do
+            time <- getCurrentTime                         -- obtém UTCTime atual que será usado no log
+            novoInv <- processarComando time (words linha) inv -- tokeniza (separa pelos espaços) e processa o comando digitado
+            loopPrincipal novoInv   -- O loop é recursivo, recebendo um inventário e, a cada iteração, se chama novamente com o novo inventário 
+
+
+
+
+
+-- ---------- Ponto de entrada Main ------------
+
+-- Ponto de entrada do programa é uma ação IO executada quando o programa inicia
+main :: IO ()
+main = do
+
+-- Impressão de cabeçalho e instruções para o usuário do que o programa espera no terminal (muito importante para UX em CLI/GDB Online).
+    putStrLn "======================================="
+    putStrLn "   Sistema de Inventário - Haskell  "
+    putStrLn "======================================="
+    putStrLn " Atenção!! os nomes dos produtos NÃO podem conter espaço!"
+    
+    putStrLn "\nComandos disponíveis:"
+    putStrLn " add <id> <nome> <qtd> <cat>"
+    putStrLn " remove <id>"
+    putStrLn " update <id> <qtd>"
+    putStrLn " exit"
+    putStrLn "----------------------------------------"
+
+    -- Inicialização: garante que o arquivo de log exista e carrega o inventário
+    carregarLog                   -- cria Auditoria.log vazio caso não exista ainda
+    inventario <- carregarInventario -- tenta ler Inventario.dat. Se não tiver, usa Map.empty
+
+    -- Inicia o loop de interação com o estado inicial carregado
+    loopPrincipal inventario    
+    
+
             
