@@ -11,6 +11,7 @@
 
 ## Objetivo
 
+A ideia do projeto é desenvolver um sistema de gerenciamento de inventário em Haskell, capaz de registrar, atualizar e remover itens do estoque de forma segura e totalmente persistente. O sistema também mantém um arquivo de auditoria com todas as operações executadas, permitindo identificar erros, acompanhar movimentações e gerar relatórios detalhados sobre o histórico de uso. O objetivo é proporcionar uma solução simples, funcional e confiável, que demonstre boas práticas de programação funcional, manipulação de arquivos e controle de estado.
 
 ---
 
