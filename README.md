@@ -42,14 +42,78 @@ A ideia do projeto é desenvolver um sistema de gerenciamento de inventário em 
 
 ## Exemplos de teste
 
+1. Adicionar um item corretamente:
+**Comando**
+```
+add P01 Teclado 10 Informatica
+```
 **Resposta Esperada** 
+```
+Item adicionado com sucesso!
+```
+
+2. Tentar adicionar item com ID duplicado:
+**Comando**
+```
+add P01 TecladoGamer 5 Informatica
+```
+**Resposta Esperada** 
+```
+Erro: ID duplicado
+```
+
+3. Atualizar quantidade:
+**Comando**
+```
+update P01 25
+```
+**Resposta Esperada** 
+```
+Quantidade atualizada!
+```
+
+4. Remover parcialmente:
+**Comando**
+```
+remove P01 5
+```
+**Resposta Esperada** 
+```
+Remoção bem-sucedida!
+```
+
+5. Gerar relatório completo:
+**Comando**
+```
+report
+```
+**Resposta Esperada** 
+```
+================== RELATÓRIO ==================
+Total de registros de log: 4
+----------------------------------------------
+Erros registrados:
+ID duplicado
+----------------------------------------------
+Item mais movimentado: Teclado (2 ocorrências)
+==============================================
+```
 
 ---
 
 ## Possíveis Melhorias Futuras
 
-* 
-
+* Implementar uma interface gráfica ou painel web para substituir o uso exclusivo do terminal, facilitando o gerenciamento do inventário.
+* Adicionar autenticação de usuários (admin, operador, auditor) para maior segurança no controle das operações críticas.
+* Integrar o inventário com um banco de dados relacional (MySQL), garantindo maior escalabilidade e segurança.
+* Criar um sistema de backup automático dos dados e logs, evitando perda de informações em caso de falha.
+* Adicionar suporte a categorias hierárquicas e subcategorias, tornando a organização dos itens mais detalhada.
+* Implementar filtros avançados na listagem de itens (por categoria, por quantidade, por faixa de estoque).
+* Permitir exportação do inventário e dos relatórios em formatos CSV, JSON ou PDF.
+* Incluir gráficos no relatório (como itens mais movimentados, itens mais críticos, histórico de alterações).
+* Criar um mecanismo de logs criptografados para aumentar a integridade da auditoria.
+* Adicionar suporte multilíngue (Português/Inglês) para tornar o sistema mais universal.
+* Permitir integração com sistemas externos, como ERPs ou sensores IoT para atualização automática do estoque.
 ---
 
 ## Licença
