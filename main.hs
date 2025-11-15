@@ -223,7 +223,7 @@ logFile = "Auditoria.log" -- Arquivo que armazena o log/auditoria do sistema
 
 
 
--- ----------- Função carregarInventario (CORRIGIDA E DETALHADA) -----------
+-- ----------- Função carregarInventario -----------
 -- Essa função garante que o inventário sempre seja carregado com segurança.
 -- Caso o arquivo esteja vazio, corrompido ou não exista, o sistema cria um inventário limpo.
 -- Utiliza 'catch' para tratar a exceção de arquivo não encontrado (requisito de robustez).
